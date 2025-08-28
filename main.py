@@ -17,12 +17,12 @@ def store_data(payload):
         f.write(json.dumps(entry) + "\n")
     return entry
 
-@app.route("/", methods=["GET"])
+@app.post("/", methods=["GET"])
 def home():
     return jsonify({"message": "Service is running", "status": "ok"}), 200
 
 # Accept POST to root (/) for Colab sim compatibility
-@app.route("/", methods=["POST"])
+@app.post("/", methods=["POST"])
 def root_post():
     payload = request.get_json(silent=True) or {}
     entry = store_data(payload)
@@ -43,3 +43,4 @@ def not_found(e):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))  # Render sets PORT automatically
     app.run(host="0.0.0.0", port=port)
+
