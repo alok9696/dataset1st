@@ -1,9 +1,12 @@
+# main.py
 from flask import Flask, request, jsonify
+from starlette.middleware.wsgi import WSGIMiddleware
 import json
 import time
 import os
 
-app = Flask(__name__)
+# --- Create your Flask app ---
+flask_app = Flask(__name__)
 
 DATA_FILE = "data_store.jsonl"  # each line = one JSON record
 
@@ -19,36 +22,39 @@ def store_data(payload, path):
     return entry
 
 # Health check
-@app.route("/", methods=["GET"])
+@flask_app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "Service is running", "status": "ok"}), 200
 
-# Accept POST to root (/) for Colab sim compatibility
-@app.route("/", methods=["POST"])
+# Accept POST to root (/)
+@flask_app.route("/", methods=["POST"])
 def root_post():
     payload = request.get_json(silent=True) or {}
     entry = store_data(payload, "/")
     return jsonify({"message": "Data stored successfully", "entry": entry}), 200
 
 # Dedicated POST /process endpoint
-@app.route("/process", methods=["POST"])
+@flask_app.route("/process", methods=["POST"])
 def process():
     payload = request.get_json(silent=True) or {}
     entry = store_data(payload, "/process")
     return jsonify({"message": "Data stored successfully", "entry": entry}), 200
 
 # Catch‑all POST handler for any other path
-@app.route("/<path:subpath>", methods=["POST"])
+@flask_app.route("/<path:subpath>", methods=["POST"])
 def catch_all_post(subpath):
     payload = request.get_json(silent=True) or {}
     entry = store_data(payload, f"/{subpath}")
     return jsonify({"message": "Data stored successfully", "entry": entry}), 200
 
 # Custom 404 for non‑POST requests
-@app.errorhandler(404)
+@flask_app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Endpoint not found"}), 404
 
+# --- Wrap Flask in WSGIMiddleware for ASGI servers ---
+asgi_app = WSGIMiddleware(flask_app)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))  # Render sets PORT automatically
-    app.run(host="0.0.0.0", port=port)
+    flask_app.run(host="0.0.0.0", port=port)
