@@ -1,3 +1,4 @@
 flask
 starlette
 uvicorn
+psycopg2-binary
