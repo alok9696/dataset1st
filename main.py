@@ -52,8 +52,8 @@ def catch_all_post(subpath):
 def not_found(e):
     return jsonify({"error": "Endpoint not found"}), 404
 
-# --- Wrap Flask in WSGIMiddleware for ASGI servers ---
-asgi_app = WSGIMiddleware(flask_app)
+# --- Wrap Flask for ASGI servers (Uvicorn, Hypercorn, etc.) ---
+app = WSGIMiddleware(flask_app)  # <— renamed to `app` so Uvicorn can find it
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))  # Render sets PORT automatically
