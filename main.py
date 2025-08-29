@@ -7,6 +7,22 @@ import time
 
 flask_app = Flask(__name__)
 
+def init_db():
+    """Create telemetry table if it doesn't exist."""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS telemetry (
+            id SERIAL PRIMARY KEY,
+            received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            path TEXT,
+            data JSONB
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
 def store_data(payload, path):
     """Insert a JSON record into the telemetry table."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
@@ -50,5 +66,7 @@ def not_found(e):
 app = WSGIMiddleware(flask_app)
 
 if __name__ == "__main__":
+    # Ensure table exists before starting the server
+    init_db()
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port)
