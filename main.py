@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, Response
 from starlette.middleware.wsgi import WSGIMiddleware
 import os
 import psycopg2
-import json
 import time
+import csv
+import io
 from psycopg2.extras import Json, RealDictCursor
 
 flask_app = Flask(__name__)
@@ -67,6 +68,20 @@ def fetch_data(limit=100):
         flask_app.logger.error(f"Error fetching data: {e}")
         return []
 
+def fetch_all_data():
+    """Fetch all telemetry records (for download)."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM telemetry ORDER BY received_at DESC")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        flask_app.logger.error(f"Error fetching all data: {e}")
+        return []
+
 # --- Routes ---
 @flask_app.route("/", methods=["GET"])
 def home():
@@ -90,37 +105,91 @@ def catch_all_post(subpath):
     entry = store_data(payload, f"/{subpath}")
     return jsonify({"message": "Data stored successfully", "entry": entry}), 200
 
-# --- New Routes to VIEW data ---
+# --- New Routes to VIEW & DOWNLOAD data ---
 @flask_app.route("/data", methods=["GET"])
 def get_data():
     """Return stored telemetry as JSON (latest 100 rows)."""
     rows = fetch_data()
     return jsonify(rows), 200
 
+@flask_app.route("/download/json", methods=["GET"])
+def download_json():
+    """Download all telemetry data as JSON file."""
+    rows = fetch_all_data()
+    return Response(
+        response=jsonify(rows).get_data(as_text=True),
+        mimetype="application/json",
+        headers={"Content-Disposition": "attachment;filename=telemetry.json"}
+    )
+
+@flask_app.route("/download/csv", methods=["GET"])
+def download_csv():
+    """Download all telemetry data as CSV file."""
+    rows = fetch_all_data()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "received_at", "path", "data"])  # header
+    for row in rows:
+        writer.writerow([row["id"], row["received_at"], row["path"], json.dumps(row["data"])])
+    return Response(
+        response=output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=telemetry.csv"}
+    )
+
 @flask_app.route("/dashboard", methods=["GET"])
 def dashboard():
-    """Simple HTML dashboard to view telemetry data."""
-    rows = fetch_data()
+    """Real-time telemetry dashboard without full page reload."""
     html = """
-    <h2>Telemetry Dashboard</h2>
-    <table border="1" cellpadding="5">
-        <tr>
-            <th>ID</th>
-            <th>Received At</th>
-            <th>Path</th>
-            <th>Data</th>
-        </tr>
-        {% for row in rows %}
-        <tr>
-            <td>{{row.id}}</td>
-            <td>{{row.received_at}}</td>
-            <td>{{row.path}}</td>
-            <td><pre>{{row.data | tojson(indent=2)}}</pre></td>
-        </tr>
-        {% endfor %}
+    <h2>Telemetry Dashboard (Live Data)</h2>
+    <button onclick="window.location.href='/download/json'">Download JSON</button>
+    <button onclick="window.location.href='/download/csv'">Download CSV</button>
+    <br><br>
+    <table id="data-table" border="1" cellpadding="5">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Received At</th>
+                <th>Path</th>
+                <th>Data</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
     </table>
+
+    <script>
+        async function fetchData() {
+            try {
+                let response = await fetch('/data');
+                let rows = await response.json();
+
+                let tbody = document.querySelector("#data-table tbody");
+                tbody.innerHTML = "";  // clear old data
+
+                rows.forEach(row => {
+                    let tr = document.createElement("tr");
+
+                    tr.innerHTML = `
+                        <td>${row.id}</td>
+                        <td>${row.received_at}</td>
+                        <td>${row.path}</td>
+                        <td><pre>${JSON.stringify(row.data, null, 2)}</pre></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("Error fetching data:", err);
+            }
+        }
+
+        // fetch immediately
+        fetchData();
+
+        // update every 5 seconds
+        setInterval(fetchData, 5000);
+    </script>
     """
-    return render_template_string(html, rows=rows)
+    return render_template_string(html)
 
 # --- Error Handlers ---
 @flask_app.errorhandler(404)
