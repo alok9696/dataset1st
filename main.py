@@ -33,12 +33,34 @@ gc = gspread.authorize(creds)
 try:
     sheet = gc.open(SHEET_NAME).sheet1
 except gspread.SpreadsheetNotFound:
-    raise Exception(f"Google Sheet '{SHEET_NAME}' not found. Create it and share with the service account email.")
+    raise Exception(
+        f"Google Sheet '{SHEET_NAME}' not found. Create it and share with the service account email."
+    )
 
 # ===============================
 # Local Store
 # ===============================
 data_store = []
+
+
+# ===============================
+# Helpers
+# ===============================
+def save_to_sheet(data: dict):
+    """Ensure headers exist and insert new row below header."""
+    headers = sheet.row_values(1)
+
+    # If sheet is empty, create headers first
+    if not headers:
+        headers = list(data.keys())
+        sheet.insert_row(headers, 1)
+
+    # Create row in same header order
+    row = [data.get(h, "") for h in headers]
+
+    # Insert new data right below header (row 2)
+    sheet.insert_row(row, 2)
+
 
 # ===============================
 # Routes
@@ -62,15 +84,8 @@ def receive_from_colab():
         # Save locally
         data_store.append(incoming)
 
-        # Ensure headers exist
-        headers = sheet.row_values(1)
-        if not headers:
-            headers = list(incoming.keys())
-            sheet.append_row(headers)
-
-        # Append row in same header order
-        row = [incoming.get(h, "") for h in headers]
-        sheet.insert_row(row)
+        # Save to Google Sheets (new at top, below header)
+        save_to_sheet(incoming)
 
         return jsonify({"status": "success", "data": incoming}), 201
 
@@ -80,10 +95,7 @@ def receive_from_colab():
 
 @app.route("/api/data", methods=["POST"])
 def collect_data():
-    """
-    Explicit endpoint for Colab/simulated devices
-    POST to `/api/data` with JSON
-    """
+    """Explicit endpoint for Colab/simulated devices"""
     return receive_from_colab()
 
 
@@ -103,26 +115,19 @@ def generate_sensor_data():
         "surrounding_temp": 25 + random.random() * 5,
         "vibration_rms": random.random() * 0.5,
         "rpm": 1000 + int(random.random() * 400),
-        "torque": 10 + random.random() * 190
+        "torque": 10 + random.random() * 190,
     }
 
     # Save locally
     data_store.append(data)
 
-    # Ensure headers in sheet
-    headers = sheet.row_values(1)
-    if not headers:
-        headers = list(data.keys())
-        sheet.append_row(headers)
-
-    # Append row
-    row = [data.get(h, "") for h in headers]
-    sheet.append_row(row)
+    # Save to Google Sheets
+    save_to_sheet(data)
 
     return jsonify(data)
 
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
     return "✅ Flask API is running. Use POST / or POST /api/data to send telemetry. Data is stored in Google Sheets!"
 
@@ -132,4 +137,3 @@ def home():
 # ===============================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
