@@ -1,4 +1,5 @@
 flask
 starlette
-uvicorn
+gunicorn
 psycopg2-binary
+
