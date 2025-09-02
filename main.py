@@ -4,16 +4,22 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import os
 import datetime
+import time
+import random
 
 app = Flask(__name__)
+
+# ===============================
+# Config
+# ===============================
+MACHINE_ID = "TEST_01"
+SHEET_NAME = "SensorData"   # <-- make sure this matches your Google Sheet name!
 
 # ===============================
 # Load Google Sheets credentials
 # ===============================
 def get_gspread_client():
-    # Credentials are stored in environment variable
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-
     if not creds_json:
         raise Exception("Missing GOOGLE_CREDENTIALS environment variable!")
 
@@ -28,17 +34,17 @@ def get_gspread_client():
     return client
 
 # ===============================
-# Example Sensor Data (From Colab or API)
+# Example Sensor Data
 # ===============================
 def get_sensor_data():
     return {
         "machine_id": MACHINE_ID,
         "ts": time.time(),
-        "temp": 40 + random.random() * 10,         # °C
+        "temp": 40 + random.random() * 10,          # °C
         "surrounding_temp": 25 + random.random() * 5,  # °C
-        "vibration_rms": random.random() * 0.5,    # g
-        "rpm": 1000 + int(random.random() * 400),  # rev/min
-        "torque": 10 + random.random() * 190       # Nm
+        "vibration_rms": random.random() * 0.5,     # g
+        "rpm": 1000 + int(random.random() * 400),   # rev/min
+        "torque": 10 + random.random() * 190        # Nm
     }
 
 # ===============================
@@ -46,11 +52,7 @@ def get_sensor_data():
 # ===============================
 def store_in_google_sheets(data):
     client = get_gspread_client()
-    
-    # Open your sheet (replace with your Sheet name)
-    sheet = client.open("SensorData").sheet1
-    
-    # Append row
+    sheet = client.open(SHEET_NAME).sheet1  # open by sheet name
     sheet.append_row([
         data["machine_id"],
         data["ts"],
