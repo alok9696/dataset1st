@@ -1,66 +1,73 @@
-from flask import Flask, jsonify, request
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import json
+from flask import Flask, request, jsonify
 import os
-import time
-import random
+import json
+import gspread
+from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
 
-# ===============================
-# Config
-# ===============================
-MACHINE_ID = "TEST_01"
-SHEET_NAME = "SensorData"   # must match your Google Sheet name!
+# --- Google Sheets Setup ---
+# Credentials JSON is stored in environment variable GOOGLE_SHEETS_CREDS
+creds_json = os.getenv("GOOGLE_SHEETS_CREDS")
 
-# ===============================
-# Load Google Sheets credentials
-# ===============================
-def get_gspread_client():
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-    if not creds_json:
-        raise Exception("Missing GOOGLE_CREDENTIALS environment variable!")
+if not creds_json:
+    raise Exception("GOOGLE_SHEETS_CREDS environment variable is not set.")
 
-    creds_dict = json.loads(creds_json)
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    return client
+creds_dict = json.loads(creds_json)
 
-def store_in_google_sheets(data):
-    client = get_gspread_client()
-    sheet = client.open(SHEET_NAME).sheet1
-    sheet.append_row([
-        data.get("machine_id"),
-        data.get("ts"),
-        data.get("temp"),
-        data.get("surrounding_temp"),
-        data.get("vibration_rms"),
-        data.get("rpm"),
-        data.get("torque"),
-    ])
+creds = Credentials.from_service_account_info(
+    creds_dict,
+    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+)
 
-# ===============================
-# API Routes
-# ===============================
-@app.route("/api/collect", methods=["POST"])
+gc = gspread.authorize(creds)
+
+# Open Google Sheet (must exist beforehand)
+SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", "MyDataSheet")
+try:
+    sheet = gc.open(SHEET_NAME).sheet1
+except gspread.SpreadsheetNotFound:
+    raise Exception(f"Google Sheet '{SHEET_NAME}' not found. Create it first.")
+
+
+# --- Store incoming data ---
+data_store = []
+
+
+@app.route("/api/data", methods=["POST"])
 def collect_data():
-    data = request.json
-    if data:
-        store_in_google_sheets(data)
-        return jsonify({"status": "success", "data": data})
-    return jsonify({"status": "error", "message": "No data received"}), 400
+    """
+    Endpoint for Colab to send data
+    Example in Colab:
+    requests.post("http://<server_ip>:5000/api/data", json={"temperature":25,"humidity":60})
+    """
+    try:
+        incoming = request.get_json()
+        if not incoming:
+            return jsonify({"error": "No JSON data received"}), 400
 
-@app.route("/")
-def home():
-    return "✅ Flask API is running and logging data to Google Sheets!"
+        # Save to in-memory store
+        data_store.append(incoming)
 
-# ===============================
-# Run Flask
-# ===============================
+        # Write to Google Sheet
+        headers = sheet.row_values(1)  # First row as header
+        if not headers:  # If sheet is empty, create headers
+            headers = list(incoming.keys())
+            sheet.append_row(headers)
+
+        row = [incoming.get(h, "") for h in headers]
+        sheet.append_row(row)
+
+        return jsonify({"status": "success", "data": incoming}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/data", methods=["GET"])
+def get_data():
+    """Returns all collected data via API"""
+    return jsonify(data_store)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
