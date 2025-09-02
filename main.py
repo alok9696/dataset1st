@@ -33,7 +33,7 @@ gc = gspread.authorize(creds)
 try:
     sheet = gc.open(SHEET_NAME).sheet1
 except gspread.SpreadsheetNotFound:
-    raise Exception(f"Google Sheet '{SHEET_NAME}' not found. Create it and share with the service account.")
+    raise Exception(f"Google Sheet '{SHEET_NAME}' not found. Create it and share with the service account email.")
 
 # ===============================
 # Local Store
@@ -43,13 +43,10 @@ data_store = []
 # ===============================
 # Routes
 # ===============================
-@app.route("/api/data", methods=["POST"])
-def collect_data():
+@app.route("/", methods=["POST"])
+def receive_from_colab():
     """
-    Endpoint for Colab (or IoT simulator) to send data.
-    Example:
-      requests.post("https://<your-app>.onrender.com/api/data",
-                    json={"temp":25,"humidity":60})
+    Accepts raw POSTs from Colab (or simulator) directly to `/`
     """
     try:
         incoming = request.get_json()
@@ -65,12 +62,13 @@ def collect_data():
         # Save locally
         data_store.append(incoming)
 
-        # Write to Google Sheet
-        headers = sheet.row_values(1)  # Check first row for headers
+        # Ensure headers exist
+        headers = sheet.row_values(1)
         if not headers:
             headers = list(incoming.keys())
             sheet.append_row(headers)
 
+        # Append row in same header order
         row = [incoming.get(h, "") for h in headers]
         sheet.append_row(row)
 
@@ -80,9 +78,18 @@ def collect_data():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/data", methods=["POST"])
+def collect_data():
+    """
+    Explicit endpoint for Colab/simulated devices
+    POST to `/api/data` with JSON
+    """
+    return receive_from_colab()
+
+
 @app.route("/api/data", methods=["GET"])
 def get_data():
-    """Return all collected data"""
+    """Return all collected in-memory data"""
     return jsonify(data_store)
 
 
@@ -117,7 +124,7 @@ def generate_sensor_data():
 
 @app.route("/")
 def home():
-    return "✅ Flask API is running. Data will be stored in Google Sheets!"
+    return "✅ Flask API is running. Use POST / or POST /api/data to send telemetry. Data is stored in Google Sheets!"
 
 
 # ===============================
