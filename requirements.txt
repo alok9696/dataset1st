@@ -4,5 +4,6 @@ gunicorn
 psycopg2-binary
 gspread
 google-auth
+oauth2client
 
 
