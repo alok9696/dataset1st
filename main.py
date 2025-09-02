@@ -8,10 +8,10 @@ app = Flask(__name__)
 
 # --- Google Sheets Setup ---
 # Credentials JSON is stored in environment variable GOOGLE_SHEETS_CREDS
-creds_json = os.getenv("GOOGLE_SHEETS_CREDS")
+creds_json = os.getenv("GOOGLE_CREDENTIALS")
 
 if not creds_json:
-    raise Exception("GOOGLE_SHEETS_CREDS environment variable is not set.")
+    raise Exception("GOOGLE_CREDENTIALS environment variable is not set.")
 
 creds_dict = json.loads(creds_json)
 
@@ -71,3 +71,4 @@ def get_data():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
