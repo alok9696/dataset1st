@@ -18,6 +18,7 @@ SHEET_NAME = "SensorData"   # <-- make sure this matches your Google Sheet name!
 # ===============================
 # Load Google Sheets credentials
 # ===============================
+
 def get_gspread_client():
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     if not creds_json:
@@ -66,6 +67,15 @@ def store_in_google_sheets(data):
 # ===============================
 # API Routes
 # ===============================
+@app.route("/api/collect", methods=["POST"])
+def collect_data():
+    data = request.json
+    if data:
+        # store in sheet
+        sheet.append_row([data.get("sensor"), data.get("value")])
+        return jsonify({"status": "success", "data": data})
+    return jsonify({"status": "error", "message": "No data received"}), 400
+
 @app.route("/api/sensors", methods=["GET"])
 def sensors():
     data = get_sensor_data()
@@ -81,3 +91,4 @@ def home():
 # ===============================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
