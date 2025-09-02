@@ -70,7 +70,7 @@ def receive_from_colab():
 
         # Append row in same header order
         row = [incoming.get(h, "") for h in headers]
-        sheet.append_row(row)
+        sheet.insert_row(row)
 
         return jsonify({"status": "success", "data": incoming}), 201
 
@@ -132,3 +132,4 @@ def home():
 # ===============================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
