@@ -68,7 +68,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, or /api/stream"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, /api/stream, /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -120,6 +120,43 @@ def stream():
                 last_size = len(data_store)
             time.sleep(1)
     return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
+
+@app.route("/dashboard")
+def dashboard():
+    """Simple HTML dashboard page with auto-updating live data"""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Live Sensor Dashboard</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #f7f7f7; padding: 20px; }
+        #log { background: white; padding: 10px; border-radius: 8px; max-height: 400px; overflow-y: auto; }
+        .entry { padding: 5px; border-bottom: 1px solid #ddd; }
+      </style>
+    </head>
+    <body>
+      <h1>📡 Live Sensor Dashboard</h1>
+      <div id="log"></div>
+
+      <script>
+        const logDiv = document.getElementById("log");
+        const evtSource = new EventSource("/api/stream");
+
+        evtSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          const entry = document.createElement("div");
+          entry.className = "entry";
+          entry.innerHTML = "<b>" + new Date(data.ts * 1000).toLocaleTimeString() + "</b> " +
+                            "| Temp: " + (data.temp ?? "-") + "°C " +
+                            "| RPM: " + (data.rpm ?? "-") + 
+                            " | Torque: " + (data.torque ?? "-");
+          logDiv.prepend(entry);
+        };
+      </script>
+    </body>
+    </html>
+    """
 
 @app.route("/health")
 def health():
