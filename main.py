@@ -1,5 +1,5 @@
 # main.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 import os, json, time, random, logging
 
 # Optional Google Sheets integration
@@ -10,6 +10,7 @@ except Exception:
     gspread = None
 
 app = Flask(__name__)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main-data")
 
@@ -21,7 +22,10 @@ sheet = None
 if gspread and CREDS_JSON:
     try:
         creds_dict = json.loads(CREDS_JSON)
-        SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        SCOPES = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         gc = gspread.authorize(creds)
         try:
@@ -39,10 +43,11 @@ else:
     else:
         logger.info("GOOGLE_CREDENTIALS not provided; skipping Google Sheets.")
 
-
-data_store = []  # in-memory history (most recent first is index 0)
+# in-memory history (newest-first)
+data_store = []
 
 def save_to_sheet(record: dict):
+    """Write a record to Google Sheet if available"""
     if not sheet:
         return
     try:
@@ -55,18 +60,15 @@ def save_to_sheet(record: dict):
     except Exception as e:
         logger.exception("Failed to write to Google Sheet: %s", e)
 
-
 @app.after_request
 def add_cors(resp):
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return resp
 
-
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data or /api/sensors"
-
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, or /api/stream"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -74,29 +76,25 @@ def receive_from_colab():
     if not incoming or not isinstance(incoming, dict):
         return jsonify({"error": "No JSON object provided"}), 400
 
-    # normalize
     incoming.setdefault("machine_id", MACHINE_ID)
     incoming.setdefault("ts", time.time())
-    # store
-    data_store.insert(0, incoming)  # newest-first
-    save_to_sheet(incoming)
-    return jsonify(incoming), 201
 
+    data_store.insert(0, incoming)  # newest first
+    save_to_sheet(incoming)
+
+    return jsonify(incoming), 201
 
 @app.route("/api/data", methods=["POST"])
 def collect_data():
     return receive_from_colab()
 
-
 @app.route("/api/data", methods=["GET"])
 def get_data():
-    # Always return list
     return jsonify(data_store)
-
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
-    # Generate a sample reading and return as list
+    """Generate a random reading"""
     data = {
         "machine_id": MACHINE_ID,
         "ts": int(time.time()),
@@ -108,15 +106,25 @@ def generate_sensor_data():
     }
     data_store.insert(0, data)
     save_to_sheet(data)
-    # IMPORTANT: return an array so clients can always treat this as a list
     return jsonify([data])
 
+@app.route("/api/stream")
+def stream():
+    """Server-Sent Events (SSE) endpoint for live data"""
+    def event_stream():
+        last_size = 0
+        while True:
+            if len(data_store) > last_size:
+                new_data = data_store[0]
+                yield f"data: {json.dumps(new_data)}\n\n"
+                last_size = len(data_store)
+            time.sleep(1)
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/health")
 def health():
     return jsonify({"ok": True, "stored_rows": len(data_store)})
 
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
