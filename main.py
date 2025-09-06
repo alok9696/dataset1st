@@ -118,7 +118,7 @@ def stream():
                 new_data = data_store[0]
                 yield f"data: {json.dumps(new_data)}\n\n"
                 last_size = len(data_store)
-            time.sleep(1)
+            time.sleep(0.5)
     return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/dashboard")
@@ -165,3 +165,4 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
