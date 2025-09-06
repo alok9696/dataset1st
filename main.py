@@ -68,7 +68,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, /api/stream, /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (stream), /api/sensors, /api/stream, /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -88,9 +88,19 @@ def receive_from_colab():
 def collect_data():
     return receive_from_colab()
 
+# 🔄 replaced normal /api/data GET with realtime streaming
 @app.route("/api/data", methods=["GET"])
-def get_data():
-    return jsonify(data_store)
+def get_data_stream():
+    """Realtime streaming version of api/data"""
+    def event_stream():
+        last_size = 0
+        while True:
+            if len(data_store) > last_size:
+                new_data = data_store[0]
+                yield f"data: {json.dumps(new_data)}\n\n"
+                last_size = len(data_store)
+            time.sleep(0.2)  # check frequently
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -165,4 +175,3 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-
