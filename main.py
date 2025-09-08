@@ -46,12 +46,12 @@ else:
 # in-memory history (newest-first)
 data_store = []
 
-# ===== Google Sheets batching =====
+# buffer for Google Sheets
 sheet_buffer = []
 buffer_lock = threading.Lock()
 
 def save_to_sheet(record: dict):
-    """Add record to buffer for Google Sheets writing"""
+    """Add a record to buffer for Google Sheets writing"""
     if not sheet:
         return
     with buffer_lock:
@@ -75,8 +75,7 @@ def flush_to_sheet():
             sheet.insert_row(headers, 1)
 
         rows = [[r.get(h, "") for h in headers] for r in records]
-        # Insert rows newest-first
-        for row in reversed(rows):
+        for row in reversed(rows):  # newest first
             sheet.insert_row(row, 2)
 
         logger.info("Flushed %d rows to Google Sheet", len(records))
@@ -89,9 +88,8 @@ def background_flusher(interval=10):
         time.sleep(interval)
         flush_to_sheet()
 
-if sheet:
-    threading.Thread(target=background_flusher, args=(10,), daemon=True).start()
-# ==================================
+# Start background sheet flusher thread
+threading.Thread(target=background_flusher, args=(10,), daemon=True).start()
 
 @app.after_request
 def add_cors(resp):
@@ -101,7 +99,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest JSON), /api/stream (SSE), /api/sensors, /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (SSE), /api/sensors, /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -110,7 +108,7 @@ def receive_from_colab():
         return jsonify({"error": "No JSON object provided"}), 400
 
     incoming.setdefault("machine_id", MACHINE_ID)
-    incoming.setdefault("ts", time.time())
+    incoming.setdefault("ts", int(time.time()))
 
     data_store.insert(0, incoming)  # newest first
     save_to_sheet(incoming)
@@ -122,15 +120,8 @@ def collect_data():
     return receive_from_colab()
 
 @app.route("/api/data", methods=["GET"])
-def get_data():
-    """Return the latest data instantly (JSON, newest-first)"""
-    if not data_store:
-        return jsonify({"error": "no data yet"}), 404
-    return jsonify(data_store[0])  # just newest record
-
-@app.route("/api/stream")
-def stream():
-    """Server-Sent Events (SSE) endpoint for live data"""
+def get_data_stream():
+    """Realtime streaming version of /api/data (SSE)"""
     def event_stream():
         last_size = 0
         while True:
@@ -140,6 +131,11 @@ def stream():
                 last_size = len(data_store)
             time.sleep(0.5)
     return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
+
+@app.route("/api/stream")
+def stream():
+    """Alias SSE endpoint for compatibility"""
+    return get_data_stream()
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -159,7 +155,7 @@ def generate_sensor_data():
 
 @app.route("/dashboard")
 def dashboard():
-    """Simple HTML dashboard page with auto-updating live data"""
+    """Simple HTML dashboard with auto-updating live data"""
     return """
     <!DOCTYPE html>
     <html>
@@ -172,12 +168,12 @@ def dashboard():
       </style>
     </head>
     <body>
-      <h1>📡 Live Sensor Dashboard</h1>
+      <h1>Live Sensor Dashboard</h1>
       <div id="log"></div>
 
       <script>
         const logDiv = document.getElementById("log");
-        const evtSource = new EventSource("/api/stream");
+        const evtSource = new EventSource("/api/data");
 
         evtSource.onmessage = (event) => {
           const data = JSON.parse(event.data);
