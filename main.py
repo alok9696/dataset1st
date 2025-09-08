@@ -68,7 +68,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest), /api/sensors, /api/stream (JSON list), /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest), /api/sensors, /api/stream (JSON list), /api/stream_sse (live SSE), /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -98,9 +98,20 @@ def get_latest_data():
 @app.route("/api/stream", methods=["GET"])
 def get_all_data():
     """Return all stored records newest-first as JSON array (not streaming)"""
-    if not data_store:
-        return jsonify([])  # empty list instead of error
-    return jsonify(data_store)  # already newest-first (insert(0,...))
+    return jsonify(data_store)  # already newest-first
+
+@app.route("/api/stream_sse", methods=["GET"])
+def stream_sse():
+    """Realtime Server-Sent Events (continuous)"""
+    def event_stream():
+        last_size = 0
+        while True:
+            if len(data_store) > last_size:
+                new_data = data_store[0]
+                yield f"data: {json.dumps(new_data)}\n\n"
+                last_size = len(data_store)
+            time.sleep(0.5)
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -121,7 +132,7 @@ def generate_sensor_data():
 @app.route("/dashboard")
 def dashboard():
     """Simple HTML dashboard page with auto-updating live data"""
-    return """
+    return
     <!DOCTYPE html>
     <html>
     <head>
@@ -157,7 +168,7 @@ def dashboard():
       </script>
     </body>
     </html>
-    """
+    
 
 @app.route("/health")
 def health():
