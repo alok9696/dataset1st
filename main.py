@@ -1,6 +1,6 @@
 # main.py
 from flask import Flask, request, jsonify, Response, stream_with_context
-import os, json, time, random, logging
+import os, json, time, random, logging, threading
 
 # Optional Google Sheets integration
 try:
@@ -46,19 +46,52 @@ else:
 # in-memory history (newest-first)
 data_store = []
 
+# ===== Google Sheets batching =====
+sheet_buffer = []
+buffer_lock = threading.Lock()
+
 def save_to_sheet(record: dict):
-    """Write a record to Google Sheet if available"""
+    """Add record to buffer for Google Sheets writing"""
+    if not sheet:
+        return
+    with buffer_lock:
+        sheet_buffer.append(record)
+
+def flush_to_sheet():
+    """Flush buffered records to Google Sheet in batches"""
+    global sheet_buffer
     if not sheet:
         return
     try:
+        with buffer_lock:
+            if not sheet_buffer:
+                return
+            records = sheet_buffer[:]
+            sheet_buffer = []
+
         headers = sheet.row_values(1)
-        if not headers:
-            headers = list(record.keys())
+        if not headers and records:
+            headers = list(records[0].keys())
             sheet.insert_row(headers, 1)
-        row = [record.get(h, "") for h in headers]
-        sheet.insert_row(row, 2)
+
+        rows = [[r.get(h, "") for h in headers] for r in records]
+        # Insert rows newest-first
+        for row in reversed(rows):
+            sheet.insert_row(row, 2)
+
+        logger.info("Flushed %d rows to Google Sheet", len(records))
     except Exception as e:
-        logger.exception("Failed to write to Google Sheet: %s", e)
+        logger.exception("Failed to flush to Google Sheet: %s", e)
+
+def background_flusher(interval=10):
+    """Background thread to flush data every N seconds"""
+    while True:
+        time.sleep(interval)
+        flush_to_sheet()
+
+if sheet:
+    threading.Thread(target=background_flusher, args=(10,), daemon=True).start()
+# ==================================
 
 @app.after_request
 def add_cors(resp):
@@ -68,7 +101,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, /api/stream, /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest JSON), /api/stream (SSE), /api/sensors, /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -89,11 +122,24 @@ def collect_data():
     return receive_from_colab()
 
 @app.route("/api/data", methods=["GET"])
-def get_latest_data():
-    """Return the newest data instantly (not continuous)"""
+def get_data():
+    """Return the latest data instantly (JSON, newest-first)"""
     if not data_store:
         return jsonify({"error": "no data yet"}), 404
-    return jsonify(data_store[0])  # newest record only
+    return jsonify(data_store[0])  # just newest record
+
+@app.route("/api/stream")
+def stream():
+    """Server-Sent Events (SSE) endpoint for live data"""
+    def event_stream():
+        last_size = 0
+        while True:
+            if len(data_store) > last_size:
+                new_data = data_store[0]
+                yield f"data: {json.dumps(new_data)}\n\n"
+                last_size = len(data_store)
+            time.sleep(0.5)
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -111,11 +157,6 @@ def generate_sensor_data():
     save_to_sheet(data)
     return jsonify([data])
 
-@app.route("/api/stream", methods=["GET"])
-def stream_snapshot():
-    """Return all data newest→oldest in one JSON (no infinite loading)"""
-    return jsonify(data_store)
-
 @app.route("/dashboard")
 def dashboard():
     """Simple HTML dashboard page with auto-updating live data"""
@@ -131,27 +172,23 @@ def dashboard():
       </style>
     </head>
     <body>
-      <h1>Live Sensor Dashboard</h1>
+      <h1>📡 Live Sensor Dashboard</h1>
       <div id="log"></div>
 
       <script>
-        async function refreshLog() {
-          const res = await fetch('/api/stream');
-          const data = await res.json();
-          const logDiv = document.getElementById("log");
-          logDiv.innerHTML = '';
-          data.forEach(d => {
-            const entry = document.createElement("div");
-            entry.className = "entry";
-            entry.innerHTML = "<b>" + new Date(d.ts * 1000).toLocaleTimeString() + "</b> " +
-                              "| Temp: " + (d.temp ?? "-") + "°C " +
-                              "| RPM: " + (d.rpm ?? "-") +
-                              " | Torque: " + (d.torque ?? "-");
-            logDiv.appendChild(entry);
-          });
-        }
-        setInterval(refreshLog, 2000);
-        refreshLog();
+        const logDiv = document.getElementById("log");
+        const evtSource = new EventSource("/api/stream");
+
+        evtSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          const entry = document.createElement("div");
+          entry.className = "entry";
+          entry.innerHTML = "<b>" + new Date(data.ts * 1000).toLocaleTimeString() + "</b> " +
+                            "| Temp: " + (data.temp ?? "-") + "°C " +
+                            "| RPM: " + (data.rpm ?? "-") + 
+                            " | Torque: " + (data.torque ?? "-");
+          logDiv.prepend(entry);
+        };
       </script>
     </body>
     </html>
