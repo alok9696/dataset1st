@@ -84,9 +84,13 @@ def receive_from_colab():
 
     return jsonify(incoming), 201
 
-@app.route("/api/data", methods=["POST"])
-def collect_data():
-    return receive_from_colab()
+@app.route("/api/data", methods=["GET"])
+def get_data():
+    """Return the latest data instantly (newest-first JSON)"""
+    if not data_store:
+        return jsonify({"error": "no data yet"}), 404
+    return jsonify(data_store[0])  # just the newest record
+
 
 # 🔄 replaced normal /api/data GET with realtime streaming
 @app.route("/api/data", methods=["GET"])
@@ -175,3 +179,4 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
