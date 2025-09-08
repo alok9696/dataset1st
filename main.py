@@ -68,7 +68,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (stream), /api/sensors, /api/stream, /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest), /api/sensors, /api/stream (JSON list), /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -84,22 +84,23 @@ def receive_from_colab():
 
     return jsonify(incoming), 201
 
-@app.route("/api/data", methods=["post"])
+@app.route("/api/data", methods=["POST"])
 def collect_data():
-   return receive_from_colab()
-# 🔄 replaced normal /api/data GET with realtime streaming
+    return receive_from_colab()
+
 @app.route("/api/data", methods=["GET"])
-def get_data_stream():
-    """Realtime streaming version of api/data"""
-    def event_stream():
-        last_size = 0
-        while True:
-            if len(data_store) > last_size:
-                new_data = data_store[0]
-                yield f"data: {json.dumps(new_data)}\n\n"
-                last_size = len(data_store)
-            time.sleep(0.2)  # check frequently
-    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
+def get_latest_data():
+    """Return only the newest data (single record)"""
+    if not data_store:
+        return jsonify({"error": "no data yet"}), 404
+    return jsonify(data_store[0])  # newest record only
+
+@app.route("/api/stream", methods=["GET"])
+def get_all_data():
+    """Return all stored records newest-first as JSON array (not streaming)"""
+    if not data_store:
+        return jsonify([])  # empty list instead of error
+    return jsonify(data_store)  # already newest-first (insert(0,...))
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -116,19 +117,6 @@ def generate_sensor_data():
     data_store.insert(0, data)
     save_to_sheet(data)
     return jsonify([data])
-
-@app.route("/api/stream")
-def stream():
-    """Server-Sent Events (SSE) endpoint for live data"""
-    def event_stream():
-        last_size = 0
-        while True:
-            if len(data_store) > last_size:
-                new_data = data_store[0]
-                yield f"data: {json.dumps(new_data)}\n\n"
-                last_size = len(data_store)
-            time.sleep(0.5)
-    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/dashboard")
 def dashboard():
@@ -149,19 +137,23 @@ def dashboard():
       <div id="log"></div>
 
       <script>
-        const logDiv = document.getElementById("log");
-        const evtSource = new EventSource("/api/stream");
-
-        evtSource.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          const entry = document.createElement("div");
-          entry.className = "entry";
-          entry.innerHTML = "<b>" + new Date(data.ts * 1000).toLocaleTimeString() + "</b> " +
-                            "| Temp: " + (data.temp ?? "-") + "°C " +
-                            "| RPM: " + (data.rpm ?? "-") + 
-                            " | Torque: " + (data.torque ?? "-");
-          logDiv.prepend(entry);
-        };
+        async function refreshLog() {
+          const res = await fetch('/api/stream');
+          const data = await res.json();
+          const logDiv = document.getElementById("log");
+          logDiv.innerHTML = '';
+          data.forEach(d => {
+            const entry = document.createElement("div");
+            entry.className = "entry";
+            entry.innerHTML = "<b>" + new Date(d.ts * 1000).toLocaleTimeString() + "</b> " +
+                              "| Temp: " + (d.temp ?? "-") + "°C " +
+                              "| RPM: " + (d.rpm ?? "-") +
+                              " | Torque: " + (d.torque ?? "-");
+            logDiv.appendChild(entry);
+          });
+        }
+        setInterval(refreshLog, 2000);
+        refreshLog();
       </script>
     </body>
     </html>
@@ -174,5 +166,3 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-
-
