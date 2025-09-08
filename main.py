@@ -130,9 +130,9 @@ def generate_sensor_data():
     return jsonify([data])
 
 @app.route("/dashboard")
-def sensor_dashboard():
+def dashboard():
     """Simple HTML dashboard page with auto-updating live data"""
-    return
+    return """
     <!DOCTYPE html>
     <html>
     <head>
@@ -167,7 +167,7 @@ def sensor_dashboard():
         refreshLog();
       </script>
     </body>
-    </html>
+    </html>"""
     
 
 @app.route("/health")
@@ -177,4 +177,5 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
 
