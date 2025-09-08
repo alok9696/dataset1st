@@ -68,7 +68,7 @@ def add_cors(resp):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data (latest), /api/sensors, /api/stream (JSON list), /api/stream_sse (live SSE), /dashboard"
+    return "✅ main.py running - POST telemetry to / or /api/data, GET /api/data, /api/sensors, /api/stream, /dashboard"
 
 @app.route("/", methods=["POST"])
 def receive_from_colab():
@@ -90,28 +90,10 @@ def collect_data():
 
 @app.route("/api/data", methods=["GET"])
 def get_latest_data():
-    """Return only the newest data (single record)"""
+    """Return the newest data instantly (not continuous)"""
     if not data_store:
         return jsonify({"error": "no data yet"}), 404
     return jsonify(data_store[0])  # newest record only
-
-@app.route("/api/stream", methods=["GET"])
-def get_all_data():
-    """Return all stored records newest-first as JSON array (not streaming)"""
-    return jsonify(data_store)  # already newest-first
-
-@app.route("/api/stream_sse", methods=["GET"])
-def stream_sse():
-    """Realtime Server-Sent Events (continuous)"""
-    def event_stream():
-        last_size = 0
-        while True:
-            if len(data_store) > last_size:
-                new_data = data_store[0]
-                yield f"data: {json.dumps(new_data)}\n\n"
-                last_size = len(data_store)
-            time.sleep(0.5)
-    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
 @app.route("/api/sensors", methods=["GET"])
 def generate_sensor_data():
@@ -129,6 +111,11 @@ def generate_sensor_data():
     save_to_sheet(data)
     return jsonify([data])
 
+@app.route("/api/stream", methods=["GET"])
+def stream_snapshot():
+    """Return all data newest→oldest in one JSON (no infinite loading)"""
+    return jsonify(data_store)
+
 @app.route("/dashboard")
 def dashboard():
     """Simple HTML dashboard page with auto-updating live data"""
@@ -144,7 +131,7 @@ def dashboard():
       </style>
     </head>
     <body>
-      <h1>📡 Live Sensor Dashboard</h1>
+      <h1>Live Sensor Dashboard</h1>
       <div id="log"></div>
 
       <script>
@@ -167,8 +154,8 @@ def dashboard():
         refreshLog();
       </script>
     </body>
-    </html>"""
-    
+    </html>
+    """
 
 @app.route("/health")
 def health():
@@ -177,5 +164,3 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-
-
